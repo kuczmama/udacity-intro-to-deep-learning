@@ -61,9 +61,11 @@ optimizer = optim.SGD(model.parameters(), lr=0.003)
 optimizer.zero_grad()
 
 
-epochs = 5
+epochs = 10
 for e in range(epochs):
     running_loss = 0
+    accuracy = 0
+    test_loss = 0
     for images, labels in trainloader:
         # Flatten MNIST images into a 784 long vector
         optimizer.zero_grad()
@@ -75,7 +77,18 @@ for e in range(epochs):
 
         running_loss += loss.item()
     else:
-        print(f"Training loss: {running_loss/len(trainloader)}")
+        for images, labels in testloader:
+            ps = model(images)
+            loss = criterion(ps, labels)
+            equals = (ps.max(dim=1).indices == labels)
+            accuracy += torch.mean(equals.float())
+            test_loss += loss.item()
+        print('Test loss: {}'.format(
+            test_loss, test_loss / len(testloader)
+        ))
+        print('Running Loss: {}'.format(
+            running_loss, running_loss / len(trainloader)))
+        print(f'Accuracy: {accuracy.item()/len(testloader)*100}%')
 
 dataiter = iter(testloader)
 images, labels = dataiter.next()
