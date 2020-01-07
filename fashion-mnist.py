@@ -6,6 +6,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import pdb
 import helper
+import matplotlib.pyplot as plt
 
 transform = transforms.Compose(
     [transforms.ToTensor(),
@@ -41,15 +42,16 @@ class Model(nn.Module):
         hidden_layers = [784, int(784 / 2)]
         output_size = 10
 
+        self.dropout = nn.Dropout(p=0.2)
         self.fc1 = nn.Linear(input_size, hidden_layers[0])
         self.fc2 = nn.Linear(hidden_layers[0], hidden_layers[1])
         self.fc3 = nn.Linear(hidden_layers[1], output_size)
 
     def forward(self, x):
         x = x.view(x.shape[0], -1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.log_softmax(self.fc3(x), dim=1)
+        x = self.dropout(F.relu(self.fc1(x)))
+        x = self.dropout(F.relu(self.fc2(x)))
+        x = self.dropout(F.log_softmax(self.fc3(x), dim=1))
         return x
 
 
@@ -61,9 +63,9 @@ optimizer = optim.SGD(model.parameters(), lr=0.003)
 optimizer.zero_grad()
 
 
-epochs = 10
+epochs = 5
 for e in range(epochs):
-    running_loss = 0
+    train_loss = 0
     accuracy = 0
     test_loss = 0
     for images, labels in trainloader:
@@ -75,21 +77,29 @@ for e in range(epochs):
         loss.backward()
         optimizer.step()
 
-        running_loss += loss.item()
+        train_loss += loss.item()
     else:
-        for images, labels in testloader:
-            ps = model(images)
-            loss = criterion(ps, labels)
-            equals = (ps.max(dim=1).indices == labels)
-            accuracy += torch.mean(equals.float())
-            test_loss += loss.item()
-        print('Test loss: {}'.format(
-            test_loss, test_loss / len(testloader)
-        ))
-        print('Running Loss: {}'.format(
-            running_loss, running_loss / len(trainloader)))
-        print(f'Accuracy: {accuracy.item()/len(testloader)*100}%')
+        with torch.no_grad():
+            model.eval()  # put in test mode
+            for images, labels in testloader:
+                ps = model(images)
+                loss = criterion(ps, labels)
+                equals = (ps.max(dim=1).indices == labels)
+                accuracy += torch.mean(equals.float())
+                test_loss += loss.item()
+            print('Epoch: {}'.format(e))
+            print('Test loss: {}'.format(test_loss / len(testloader)
+                                         ))
+            print('Running Loss: {}'.format(train_loss / len(trainloader)))
+            print(f'Accuracy: {accuracy.item()/len(testloader)*100}%')
+            plt.plot(train_loss, label='training loss')
+            plt.plot(test_loss, label='test loss')
 
+            model.train()  # Go back to training mode
+
+plt.show()
+
+model.eval()
 dataiter = iter(testloader)
 images, labels = dataiter.next()
 
