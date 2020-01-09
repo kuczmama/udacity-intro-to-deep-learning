@@ -39,8 +39,8 @@ images, labels = next(iter(trainloader))
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
-        input_size = 50176
-        hidden_layers = [50176, int(50176 / 2)]
+        input_size = 150528
+        hidden_layers = [150528, int(150528 / 2)]
         output_size = 2
 
         self.dropout = nn.Dropout(p=0.2)
@@ -49,7 +49,7 @@ class Model(nn.Module):
         self.fc3 = nn.Linear(hidden_layers[1], output_size)
 
     def forward(self, x):
-        x = x.view(x.shape[0], x.shape[1], -1)
+        x = x.view(x.shape[0], -1)
         x = self.dropout(F.relu(self.fc1(x)))
         x = self.dropout(F.relu(self.fc2(x)))
         x = self.dropout(F.log_softmax(self.fc3(x), dim=2))
