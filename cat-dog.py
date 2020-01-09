@@ -1,114 +1,104 @@
-import torch
-import torch.nn.functional as F
-from torch import nn, optim
-import torchvision
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
-import pdb
-import helper
+from collections import OrderedDict
 import matplotlib.pyplot as plt
 
-transform = transforms.Compose(
-    [transforms.Resize(255),
-     transforms.CenterCrop(224),
-     transforms.ToTensor(),
-     transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-     ])
+import torch
+from torch import nn
+from torch import optim
+import torch.nn.functional as F
+from torchvision import datasets, transforms, models
+import pdb
+import helper
+import time
 
-trainset = datasets.ImageFolder(
-    '/sdc/training-data/Cat_Dog_data/train', transform=transform)
+data_dir = '/sdc/training-data/Cat_Dog_data'
+
+# TODO: Define transforms for the training data and testing data
+train_transforms = transforms.Compose([transforms.RandomRotation(30),
+                                       transforms.RandomResizedCrop(224),
+                                       transforms.RandomHorizontalFlip(),
+                                       transforms.ToTensor(),
+                                       transforms.Normalize([0.485, 0.456, 0.406],
+                                                            [0.229, 0.224, 0.225])])
+
+test_transforms = transforms.Compose([transforms.Resize(255),
+                                      transforms.CenterCrop(224),
+                                      transforms.ToTensor(),
+                                      transforms.Normalize([0.485, 0.456, 0.406],
+                                                           [0.229, 0.224, 0.225])])
+
+# Pass transforms in here, then run the next cell to see how the transforms look
+train_data = datasets.ImageFolder(
+    data_dir + '/train', transform=train_transforms)
+test_data = datasets.ImageFolder(data_dir + '/test', transform=test_transforms)
+
 trainloader = torch.utils.data.DataLoader(
-    trainset, batch_size=64, shuffle=True)
+    train_data, batch_size=64, shuffle=True)
+testloader = torch.utils.data.DataLoader(test_data, batch_size=64)
 
+model = models.densenet121(pretrained=True)
 
-testset = datasets.ImageFolder(
-    '/sdc/training-data/Cat_Dog_data/train', transform=None)
-testloader = torch.utils.data.DataLoader(
-    testset,
-    batch_size=64,
-    shuffle=True
-)
+# Use GPU if it's available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+model = models.densenet121(pretrained=True)
 
-images, labels = next(iter(trainloader))
-# plt.imshow(images[0].numpy().transpose((1, 2, 0)))
-# plt.show()
-# pdb.set_trace()
+# Freeze parameters so we don't backprop through them
+for param in model.parameters():
+    param.requires_grad = False
 
+model.classifier = nn.Sequential(nn.Linear(1024, 256),
+                                 nn.ReLU(),
+                                 nn.Dropout(0.2),
+                                 nn.Linear(256, 2),
+                                 nn.LogSoftmax(dim=1))
 
-class Model(nn.Module):
-    def __init__(self):
-        super(Model, self).__init__()
-        input_size = 150528
-        hidden_layers = [150528, int(150528 / 2)]
-        output_size = 2
-
-        self.dropout = nn.Dropout(p=0.2)
-        self.fc1 = nn.Linear(input_size, hidden_layers[0])
-        self.fc2 = nn.Linear(hidden_layers[0], hidden_layers[1])
-        self.fc3 = nn.Linear(hidden_layers[1], output_size)
-
-    def forward(self, x):
-        x = x.view(x.shape[0], -1)
-        x = self.dropout(F.relu(self.fc1(x)))
-        x = self.dropout(F.relu(self.fc2(x)))
-        x = self.dropout(F.log_softmax(self.fc3(x), dim=2))
-        return x
-
-
-# # THis is the image that we want to show...
-
-model = Model()
 criterion = nn.NLLLoss()
-optimizer = optim.SGD(model.parameters(), lr=0.003)
-optimizer.zero_grad()
 
+# Only train the classifier parameters, feature parameters are frozen
+optimizer = optim.Adam(model.classifier.parameters(), lr=0.003)
 
-epochs = 5
-for e in range(epochs):
-    train_loss = 0
-    accuracy = 0
-    test_loss = 0
-    for images, labels in trainloader:
-        # pdb.set_trace()
-        # Flatten MNIST images into a 784 long vector
+model.to(device)
+
+epochs = 1
+steps = 0
+running_loss = 0
+print_every = 5
+for epoch in range(epochs):
+    for inputs, labels in trainloader:
+        steps += 1
+        # Move input and label tensors to the default device
+        inputs, labels = inputs.to(device), labels.to(device)
+
         optimizer.zero_grad()
 
-        output = model(images)
-        pdb.set_trace()
-        loss = criterion(output, labels)
+        logps = model.forward(inputs)
+        loss = criterion(logps, labels)
         loss.backward()
         optimizer.step()
 
-        train_loss += loss.item()
-    else:
-        print("Beginning to test")
-        with torch.no_grad():
-            model.eval()  # put in test mode
-            for images, labels in testloader:
-                ps = model(images)
-                loss = criterion(ps, labels)
-                equals = (ps.max(dim=1).indices == labels)
-                accuracy += torch.mean(equals.float())
-                test_loss += loss.item()
-            print('Epoch: {}'.format(e))
-            print('Test loss: {}'.format(test_loss / len(testloader)
-                                         ))
-            print('Running Loss: {}'.format(train_loss / len(trainloader)))
-            print(f'Accuracy: {accuracy.item()/len(testloader)*100}%')
-            plt.plot(train_loss, label='training loss')
-            plt.plot(test_loss, label='test loss')
+        running_loss += loss.item()
 
-            model.train()  # Go back to training mode
+        if steps % print_every == 0:
+            test_loss = 0
+            accuracy = 0
+            model.eval()
+            with torch.no_grad():
+                for inputs, labels in testloader:
+                    inputs, labels = inputs.to(device), labels.to(device)
+                    logps = model.forward(inputs)
+                    batch_loss = criterion(logps, labels)
 
-# plt.show()
+                    test_loss += batch_loss.item()
 
-# model.eval()
-# dataiter = iter(testloader)
-# images, labels = dataiter.next()
+                    # Calculate accuracy
+                    ps = torch.exp(logps)
+                    top_p, top_class = ps.topk(1, dim=1)
+                    equals = top_class == labels.view(*top_class.shape)
+                    accuracy += torch.mean(equals.type(torch.FloatTensor)).item()
 
-# # TODO: Calculate the class probabilities (softmax) for img
-# ps = torch.exp(model(images[1]))
-
-# # Plot the image and probabilities
-# helper.view_classify(images[1], ps, version='Fashion')
+            print(f"Epoch {epoch+1}/{epochs}.. "
+                  f"Train loss: {running_loss/print_every:.3f}.. "
+                  f"Test loss: {test_loss/len(testloader):.3f}.. "
+                  f"Test accuracy: {accuracy/len(testloader):.3f}")
+            running_loss = 0
+            model.train()
