@@ -9,8 +9,10 @@ from torchvision import datasets, transforms, models
 import pdb
 import helper
 import time
+import os
 
-data_dir = '/sdc/training-data/Cat_Dog_data'
+data_dir = '~/ai/training-data/Cat_Dog_data'
+SAVE_DATA_PATH = './trained-cat-dog.pth'
 
 # TODO: Define transforms for the training data and testing data
 train_transforms = transforms.Compose([transforms.RandomRotation(30),
@@ -39,6 +41,7 @@ model = models.densenet121(pretrained=True)
 
 # Use GPU if it's available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Device: {device}")
 
 model = models.densenet121(pretrained=True)
 
@@ -59,11 +62,19 @@ optimizer = optim.Adam(model.classifier.parameters(), lr=0.003)
 
 model.to(device)
 
-epochs = 1
+epoch = 0
+if os.path.isfile(SAVE_DATA_PATH):
+    checkpoint = torch.load(SAVE_DATA_PATH)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    epoch = checkpoint['epoch']
+    loss = checkpoint['loss']
+
+epochs = 10
 steps = 0
 running_loss = 0
 print_every = 5
-for epoch in range(epochs):
+while epoch < epochs:
     for inputs, labels in trainloader:
         steps += 1
         # Move input and label tensors to the default device
@@ -101,4 +112,12 @@ for epoch in range(epochs):
                   f"Test loss: {test_loss/len(testloader):.3f}.. "
                   f"Test accuracy: {accuracy/len(testloader):.3f}")
             running_loss = 0
+
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': loss,
+            }, SAVE_DATA_PATH)
             model.train()
+    epoch += 1
